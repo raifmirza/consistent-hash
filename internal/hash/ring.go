@@ -52,6 +52,26 @@ func (hr *HashRing) GetNode(key string) (*node.Node, bool) {
 	return hr.ring[nodeHash], true
 }
 
+func (hr *HashRing) RemoveNode(n *node.Node) {
+
+	for i := 0; i < hr.replicas; i++ {
+		virtualID := fmt.Sprintf("%s#%d", n.ID, i)
+		hash := Hash(virtualID)
+		delete(hr.ring, hash)
+
+		idx := sort.Search(len(hr.sortedHash), func(i int) bool {
+			return hr.sortedHash[i] >= hash
+		})
+
+		if idx < len(hr.sortedHash) && hr.sortedHash[idx] == hash {
+			hr.sortedHash = append(
+				hr.sortedHash[:idx],
+				hr.sortedHash[idx+1:]...,
+			)
+		}
+	}
+}
+
 func (hr *HashRing) PrintRing() {
 	for _, h := range hr.sortedHash {
 		fmt.Printf("%10d -> %s\n", h, hr.ring[h].ID)
