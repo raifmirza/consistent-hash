@@ -8,6 +8,13 @@ import (
 	"github.com/raifmirza/consistent-hash/internal/node"
 )
 
+type RingManager interface {
+	AddNode(n *node.Node)
+	RemoveNode(n *node.Node)
+	GetNode(key string) (*node.Node, bool)
+	PrintRing()
+}
+
 type HashRing struct {
 	mu           sync.RWMutex
 	replicas     int

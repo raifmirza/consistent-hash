@@ -1,7 +1,8 @@
 package health
 
 type NodeStatus struct {
-	Healthy              bool
+	State                HealthState
 	ConsecutiveFailures  int
 	ConsecutiveSuccesses int
+	LastError            error
 }

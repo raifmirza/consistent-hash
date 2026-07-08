@@ -1,8 +1,8 @@
 package health
 
 import (
+	"context"
 	"log"
-	"net/http"
 	"sync"
 	"time"
 
@@ -15,7 +15,7 @@ type HealthChecker struct {
 
 	ring *hash.HashRing
 
-	client *http.Client
+	prober Prober
 
 	interval time.Duration
 
@@ -28,7 +28,7 @@ type HealthChecker struct {
 	successThreshold int
 }
 
-func NewHealthChecker(ring *hash.HashRing, interval time.Duration, nodes []*node.Node, failureThreshold int, successThreshold int) *HealthChecker {
+func NewHealthChecker(ring *hash.HashRing, interval time.Duration, prober Prober, nodes []*node.Node, failureThreshold int, successThreshold int) *HealthChecker {
 	nodeMap := make(map[string]*node.Node)
 	for _, n := range nodes {
 		nodeMap[n.ID] = n
@@ -37,13 +37,13 @@ func NewHealthChecker(ring *hash.HashRing, interval time.Duration, nodes []*node
 	status := make(map[string]*NodeStatus)
 
 	for _, n := range nodes {
-		status[n.ID] = &NodeStatus{Healthy: true}
+		status[n.ID] = &NodeStatus{State: StateUnknown}
 		nodeMap[n.ID] = n
 	}
 
 	return &HealthChecker{
 		ring:             ring,
-		client:           &http.Client{Timeout: 2 * time.Second},
+		prober:           prober,
 		interval:         interval,
 		nodes:            nodeMap,
 		status:           status,
@@ -63,28 +63,26 @@ func (hc *HealthChecker) Start() {
 	}
 }
 
-func (hc *HealthChecker) checkNode(n *node.Node) bool {
-	resp, err := hc.client.Get(n.Address + "/health")
-	if err != nil {
-		return false
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
-}
-
 func (hc *HealthChecker) checkAndUpdate(n *node.Node) {
-	healthy := hc.checkNode(n)
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		3*time.Second,
+	)
+	defer cancel()
+
+	err := hc.prober.Probe(ctx, n)
+
 	hc.mutex.Lock()
 	defer hc.mutex.Unlock()
 
 	status := hc.status[n.ID]
 
-	if healthy {
+	if err == nil {
 		status.ConsecutiveFailures = 0
 		status.ConsecutiveSuccesses++
 
-		if !status.Healthy && status.ConsecutiveFailures >= hc.failureThreshold {
-			status.Healthy = true
+		if status.State != StateHealthy && status.ConsecutiveFailures >= hc.failureThreshold {
+			status.State = StateHealthy
 			status.ConsecutiveSuccesses = 0
 
 			hc.ring.AddNode(n)
@@ -97,8 +95,8 @@ func (hc *HealthChecker) checkAndUpdate(n *node.Node) {
 	status.ConsecutiveSuccesses = 0
 	status.ConsecutiveFailures++
 
-	if status.Healthy && status.ConsecutiveFailures >= hc.failureThreshold {
-		status.Healthy = false
+	if status.State != StateUnhealthy && status.ConsecutiveFailures >= hc.failureThreshold {
+		status.State = StateUnhealthy
 		status.ConsecutiveFailures = 0
 
 		hc.ring.RemoveNode(n)
