@@ -31,7 +31,7 @@ func (p *HttpProber) Probe(ctx context.Context, n *node.Node) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		return fmt.Errorf("unexpected status: %d", resp.StatusCode)
 	}
 	return nil
 }

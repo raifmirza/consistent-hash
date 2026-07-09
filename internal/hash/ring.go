@@ -1,6 +1,7 @@
 package hash
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"sync"
@@ -8,27 +9,25 @@ import (
 	"github.com/raifmirza/consistent-hash/internal/node"
 )
 
-type RingManager interface {
-	AddNode(n *node.Node)
-	RemoveNode(n *node.Node)
-	GetNode(key string) (*node.Node, bool)
-	PrintRing()
-}
+var ErrEmptyRing = errors.New("hash ring is empty")
 
 type HashRing struct {
 	mu           sync.RWMutex
 	replicas     int
-	ring         map[uint32]*node.Node
+	ring         map[uint32]string
 	sortedHashes []uint32
 	nodeHashes   map[string][]uint32
 }
 
 func NewHashRing(replicas int) *HashRing {
 	return &HashRing{
-		replicas:     replicas,
-		ring:         make(map[uint32]*node.Node),
+		replicas: replicas,
+
+		ring: make(map[uint32]string),
+
 		sortedHashes: make([]uint32, 0),
-		nodeHashes:   make(map[string][]uint32),
+
+		nodeHashes: make(map[string][]uint32),
 	}
 }
 
@@ -36,7 +35,6 @@ func (hr *HashRing) AddNode(n *node.Node) {
 	hr.mu.Lock()
 	defer hr.mu.Unlock()
 
-	// Prevent duplicate additions.
 	if _, exists := hr.nodeHashes[n.ID]; exists {
 		return
 	}
@@ -48,7 +46,7 @@ func (hr *HashRing) AddNode(n *node.Node) {
 
 		hash := Hash(virtualID)
 
-		hr.ring[hash] = n
+		hr.ring[hash] = n.ID
 		hr.sortedHashes = append(hr.sortedHashes, hash)
 		hashes = append(hashes, hash)
 	}
@@ -58,27 +56,6 @@ func (hr *HashRing) AddNode(n *node.Node) {
 	sort.Slice(hr.sortedHashes, func(i, j int) bool {
 		return hr.sortedHashes[i] < hr.sortedHashes[j]
 	})
-}
-
-func (hr *HashRing) GetNode(key string) (*node.Node, bool) {
-	hr.mu.RLock()
-	defer hr.mu.RUnlock()
-
-	if len(hr.sortedHashes) == 0 {
-		return nil, false
-	}
-
-	hash := Hash(key)
-
-	idx := sort.Search(len(hr.sortedHashes), func(i int) bool {
-		return hr.sortedHashes[i] >= hash
-	})
-
-	if idx == len(hr.sortedHashes) {
-		idx = 0
-	}
-
-	return hr.ring[hr.sortedHashes[idx]], true
 }
 
 func (hr *HashRing) RemoveNode(n *node.Node) {
@@ -110,8 +87,24 @@ func (hr *HashRing) RemoveNode(n *node.Node) {
 	delete(hr.nodeHashes, n.ID)
 }
 
-func (hr *HashRing) PrintRing() {
-	for _, h := range hr.sortedHashes {
-		fmt.Printf("%10d -> %s\n", h, hr.ring[h].ID)
+func (hr *HashRing) GetBackendID(key string) (string, error) {
+
+	hr.mu.RLock()
+	defer hr.mu.RUnlock()
+
+	if len(hr.sortedHashes) == 0 {
+		return "", ErrEmptyRing
 	}
+
+	hash := Hash(key)
+
+	idx := sort.Search(len(hr.sortedHashes), func(i int) bool {
+		return hr.sortedHashes[i] >= hash
+	})
+
+	if idx == len(hr.sortedHashes) {
+		idx = 0
+	}
+
+	return hr.ring[hr.sortedHashes[idx]], nil
 }

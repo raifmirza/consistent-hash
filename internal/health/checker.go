@@ -2,7 +2,6 @@ package health
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 type HealthChecker struct {
 	mutex sync.Mutex
 
-	ring *hash.HashRing
+	ring hash.RingManager
 
 	prober Prober
 
@@ -28,12 +27,8 @@ type HealthChecker struct {
 	successThreshold int
 }
 
-func NewHealthChecker(ring *hash.HashRing, interval time.Duration, prober Prober, nodes []*node.Node, failureThreshold int, successThreshold int) *HealthChecker {
+func NewHealthChecker(ring hash.RingManager, interval time.Duration, prober Prober, nodes []*node.Node, failureThreshold int, successThreshold int) *HealthChecker {
 	nodeMap := make(map[string]*node.Node)
-	for _, n := range nodes {
-		nodeMap[n.ID] = n
-	}
-
 	status := make(map[string]*NodeStatus)
 
 	for _, n := range nodes {
@@ -52,20 +47,24 @@ func NewHealthChecker(ring *hash.HashRing, interval time.Duration, prober Prober
 	}
 }
 
-func (hc *HealthChecker) Start() {
+func (hc *HealthChecker) Start(ctx context.Context) {
 
 	ticker := time.NewTicker(hc.interval)
 	defer ticker.Stop()
 
 	for {
-		<-ticker.C
-		hc.checkAll()
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			hc.checkAll(ctx)
+		}
 	}
 }
 
-func (hc *HealthChecker) checkAndUpdate(n *node.Node) {
+func (hc *HealthChecker) checkAndUpdate(parentCtx context.Context, n *node.Node) {
 	ctx, cancel := context.WithTimeout(
-		context.Background(),
+		parentCtx,
 		3*time.Second,
 	)
 	defer cancel()
@@ -80,20 +79,21 @@ func (hc *HealthChecker) checkAndUpdate(n *node.Node) {
 	if err == nil {
 		status.ConsecutiveFailures = 0
 		status.ConsecutiveSuccesses++
+		status.LastError = nil
 
-		if status.State != StateHealthy && status.ConsecutiveFailures >= hc.failureThreshold {
+		if status.State != StateHealthy && status.ConsecutiveSuccesses >= hc.successThreshold {
 			status.State = StateHealthy
 			status.ConsecutiveSuccesses = 0
 
 			hc.ring.AddNode(n)
 
-			log.Printf("%s recovered", n.ID)
 		}
 		return
 	}
 
 	status.ConsecutiveSuccesses = 0
 	status.ConsecutiveFailures++
+	status.LastError = err
 
 	if status.State != StateUnhealthy && status.ConsecutiveFailures >= hc.failureThreshold {
 		status.State = StateUnhealthy
@@ -101,17 +101,16 @@ func (hc *HealthChecker) checkAndUpdate(n *node.Node) {
 
 		hc.ring.RemoveNode(n)
 
-		log.Printf("%s became unhealthy", n.ID)
 	}
 }
 
-func (hc *HealthChecker) checkAll() {
+func (hc *HealthChecker) checkAll(ctx context.Context) {
 	wg := sync.WaitGroup{}
 	for _, n := range hc.nodes {
 		wg.Add(1)
 		go func(n *node.Node) {
 			defer wg.Done()
-			hc.checkAndUpdate(n)
+			hc.checkAndUpdate(ctx, n)
 		}(n)
 	}
 	wg.Wait()

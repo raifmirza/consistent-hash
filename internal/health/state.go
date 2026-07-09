@@ -1,23 +1,20 @@
 package health
 
-type HealthState int
+type State uint8
 
 const (
-	StateUnknown HealthState = iota
+	StateUnknown State = iota
 	StateHealthy
 	StateUnhealthy
 )
 
-func (hs HealthState) String() string {
-	switch hs {
-	case StateUnknown:
-		return "Unknown"
+func (s State) String() string {
+	switch s {
 	case StateHealthy:
 		return "Healthy"
 	case StateUnhealthy:
 		return "Unhealthy"
 	default:
 		return "Unknown"
-
 	}
 }
