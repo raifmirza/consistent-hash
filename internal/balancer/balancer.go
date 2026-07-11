@@ -3,11 +3,12 @@ package balancer
 import (
 	"net/http"
 
-	b "github.com/raifmirza/consistent-hash/internal/backend"
+	"github.com/raifmirza/consistent-hash/internal/backend"
+	"github.com/raifmirza/consistent-hash/internal/hash"
 )
 
 type BackendRegistry interface {
-	GetBackend(id string) (*b.Backend, bool)
+	Lookup(id string) (*backend.Backend, error)
 }
 
 type Router interface {
@@ -15,7 +16,7 @@ type Router interface {
 }
 
 type LoadBalancer struct {
-	router Router
+	router hash.Router
 
 	registry BackendRegistry
 
@@ -23,7 +24,7 @@ type LoadBalancer struct {
 }
 
 func NewLoadBalancer(
-	router Router,
+	router hash.Router,
 	registry BackendRegistry,
 	extractor KeyExtractor,
 ) *LoadBalancer {
@@ -52,9 +53,9 @@ func (lb *LoadBalancer) ServeHTTP(
 		return
 	}
 
-	backend, ok := lb.registry.GetBackend(backendID)
-	if !ok {
-		http.Error(w, "backend not found", http.StatusServiceUnavailable)
+	backend, err := lb.registry.Lookup(backendID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
 		return
 	}
 

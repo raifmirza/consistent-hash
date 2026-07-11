@@ -1,63 +1,59 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"log"
 	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+	"sync/atomic"
 )
 
 type Response struct {
-	Server string `json:"server"`
-	Path   string `json:"path"`
+	ServerID string `json:"server_id"`
+	Path     string `json:"path"`
+	Method   string `json:"method"`
+	Requests uint64 `json:"requests"`
 }
 
 func main() {
 
-	port := flag.String("port", "8081", "")
+	port := flag.String("port", "8081", "server port")
 	flag.Parse()
 
 	serverID := "server-" + *port
 
+	var requestCount atomic.Uint64
+
 	mux := http.NewServeMux()
 
+	// Health endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 	})
 
+	// Demo endpoint
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 
+		count := requestCount.Add(1)
+
 		resp := Response{
-			Server: serverID,
-			Path:   r.URL.Path,
+			ServerID: serverID,
+			Path:     r.URL.Path,
+			Method:   r.Method,
+			Requests: count,
 		}
 
-		json.NewEncoder(w).Encode(resp)
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
 	})
 
-	srv := http.Server{Addr: ":" + *port, Handler: mux}
+	log.Printf("%s listening on :%s", serverID, *port)
 
-	go func() {
-		log.Printf("%s listening on :%s", serverID, *port)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("listen error: %v", err)
-		}
-	}()
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("forced shutdown: %v", err)
+	if err := http.ListenAndServe(":"+*port, mux); err != nil {
+		log.Fatal(err)
 	}
-
-	log.Println("server exited gracefully")
 }

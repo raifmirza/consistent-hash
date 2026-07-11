@@ -13,7 +13,7 @@ type HttpProber struct {
 	client *http.Client
 }
 
-func NewHttpProber(timeout time.Duration) *HttpProber {
+func NewHTTPProber(timeout time.Duration) *HttpProber {
 	return &HttpProber{client: &http.Client{
 		Timeout: timeout,
 	},

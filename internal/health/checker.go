@@ -5,42 +5,38 @@ import (
 	"sync"
 	"time"
 
+	"github.com/raifmirza/consistent-hash/internal/backend"
 	"github.com/raifmirza/consistent-hash/internal/hash"
 	"github.com/raifmirza/consistent-hash/internal/node"
 )
 
+type BackendProvider interface {
+	List() []*backend.Backend
+}
+
 type HealthChecker struct {
 	mutex sync.Mutex
 
-	ring hash.RingManager
-
-	prober Prober
-
-	interval time.Duration
-
-	nodes map[string]*node.Node
+	provider BackendProvider
+	ring     hash.RingManager
+	prober   Prober
 
 	status map[string]*NodeStatus
 
-	failureThreshold int
+	interval time.Duration
 
+	failureThreshold int
 	successThreshold int
 }
 
-func NewHealthChecker(ring hash.RingManager, interval time.Duration, prober Prober, nodes []*node.Node, failureThreshold int, successThreshold int) *HealthChecker {
-	nodeMap := make(map[string]*node.Node)
+func NewHealthChecker(provider BackendProvider, ring hash.RingManager, interval time.Duration, prober Prober, failureThreshold int, successThreshold int) *HealthChecker {
 	status := make(map[string]*NodeStatus)
 
-	for _, n := range nodes {
-		status[n.ID] = &NodeStatus{State: StateUnknown}
-		nodeMap[n.ID] = n
-	}
-
 	return &HealthChecker{
+		provider:         provider,
 		ring:             ring,
 		prober:           prober,
 		interval:         interval,
-		nodes:            nodeMap,
 		status:           status,
 		failureThreshold: failureThreshold,
 		successThreshold: successThreshold,
@@ -48,6 +44,7 @@ func NewHealthChecker(ring hash.RingManager, interval time.Duration, prober Prob
 }
 
 func (hc *HealthChecker) Start(ctx context.Context) {
+	hc.checkAll(ctx)
 
 	ticker := time.NewTicker(hc.interval)
 	defer ticker.Stop()
@@ -74,7 +71,13 @@ func (hc *HealthChecker) checkAndUpdate(parentCtx context.Context, n *node.Node)
 	hc.mutex.Lock()
 	defer hc.mutex.Unlock()
 
-	status := hc.status[n.ID]
+	status, ok := hc.status[n.ID]
+	if !ok {
+		status = &NodeStatus{
+			State: StateUnknown,
+		}
+		hc.status[n.ID] = status
+	}
 
 	if err == nil {
 		status.ConsecutiveFailures = 0
@@ -105,13 +108,14 @@ func (hc *HealthChecker) checkAndUpdate(parentCtx context.Context, n *node.Node)
 }
 
 func (hc *HealthChecker) checkAll(ctx context.Context) {
+	backends := hc.provider.List()
 	wg := sync.WaitGroup{}
-	for _, n := range hc.nodes {
+	for _, b := range backends {
 		wg.Add(1)
-		go func(n *node.Node) {
+		go func(b *backend.Backend) {
 			defer wg.Done()
-			hc.checkAndUpdate(ctx, n)
-		}(n)
+			hc.checkAndUpdate(ctx, b.Node)
+		}(b)
 	}
 	wg.Wait()
 }
