@@ -9,15 +9,16 @@ import (
 )
 
 type Config struct {
-	Server   ServerConfig
-	HashRing HashRingConfig
-	Health   HealthConfig
-	Backends []BackendConfig
+	Server   ServerConfig    `yaml:"server"`
+	HashRing HashRingConfig  `yaml:"hashRing"`
+	Health   HealthConfig    `yaml:"health"`
+	Backends []BackendConfig `yaml:"backends"`
 }
 
 type ServerConfig struct {
 	Address string `yaml:"address"`
 }
+
 type HashRingConfig struct {
 	Replicas int `yaml:"replicas"`
 }
@@ -25,8 +26,8 @@ type HashRingConfig struct {
 type HealthConfig struct {
 	Interval         time.Duration `yaml:"interval"`
 	Timeout          time.Duration `yaml:"timeout"`
-	FailureThreshold int           `yaml:"failure_threshold"`
-	SuccessThreshold int           `yaml:"success_threshold"`
+	FailureThreshold int           `yaml:"failureThreshold"`
+	SuccessThreshold int           `yaml:"successThreshold"`
 }
 
 type BackendConfig struct {
