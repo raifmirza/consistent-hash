@@ -1,0 +1,21 @@
+server:
+  address: ":8080"
+
+hashRing:
+  replicas: 100
+
+health:
+  interval: 5s
+  timeout: 2s
+  failureThreshold: 3
+  successThreshold: 2
+
+backends:
+  - id: server-8081
+    address: http://localhost:8081
+
+  - id: server-8082
+    address: http://localhost:8082
+
+  - id: server-8083
+    address: http://localhost:8083

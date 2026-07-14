@@ -10,6 +10,7 @@ import (
 
 	"github.com/raifmirza/consistent-hash/internal/backend"
 	"github.com/raifmirza/consistent-hash/internal/balancer"
+	"github.com/raifmirza/consistent-hash/internal/config"
 	"github.com/raifmirza/consistent-hash/internal/discovery"
 	"github.com/raifmirza/consistent-hash/internal/hash"
 	"github.com/raifmirza/consistent-hash/internal/health"
@@ -26,30 +27,23 @@ func main() {
 	)
 	defer stop()
 
+	cfg, err := config.Load("configs/config.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	//-------------------------------------------------
 	// Registry
 	//-------------------------------------------------
 
 	registry := backend.NewRegistry()
 
-	initialNodes := []*node.Node{
-		{
-			ID:      "server-8081",
-			Address: "http://localhost:8081",
-		},
-		{
-			ID:      "server-8082",
-			Address: "http://localhost:8082",
-		},
-		{
-			ID:      "server-8083",
-			Address: "http://localhost:8083",
-		},
-	}
+	for _, n := range cfg.Backends {
 
-	for _, n := range initialNodes {
-
-		if _, err := registry.Register(n); err != nil {
+		if _, err := registry.Register(&node.Node{
+			Address: n.Address,
+			ID:      n.ID,
+		}); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -58,23 +52,23 @@ func main() {
 	// Hash Ring
 	//-------------------------------------------------
 
-	ring := hash.NewHashRing(100)
+	ring := hash.NewHashRing(cfg.HashRing.Replicas)
 
 	//-------------------------------------------------
 	// Health Checker
 	//-------------------------------------------------
 
 	prober := health.NewHTTPProber(
-		2 * time.Second,
+		cfg.Health.Timeout,
 	)
 
 	checker := health.NewHealthChecker(
 		registry,
 		ring,
-		5*time.Second,
+		cfg.Health.Interval,
 		prober,
-		3, // failures before removal
-		2, // successes before recovery
+		cfg.Health.FailureThreshold, // failures before removal
+		cfg.Health.SuccessThreshold, // successes before recovery
 	)
 
 	go checker.Start(ctx)
@@ -119,7 +113,7 @@ func main() {
 	)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    cfg.Server.Address,
 		Handler: mux,
 	}
 
@@ -133,7 +127,6 @@ func main() {
 
 		if err := server.ListenAndServe(); err != nil &&
 			err != http.ErrServerClosed {
-
 			log.Fatal(err)
 		}
 
